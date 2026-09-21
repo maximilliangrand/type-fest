@@ -1,18 +1,12 @@
-import type {BuiltIns, HasMultipleCallSignatures} from './internal/index.d.ts';
+import type {BuiltIns} from './internal/index.d.ts';
 import type {IsNever} from './is-never.d.ts';
-import type {Simplify} from './simplify.d.ts';
 
 /**
-Create a deep version of another type where all keys are set to also accept `undefined`.
+Create a deep version of another type where leaf values also accept `undefined`, keeping object containers present.
 
-This is like {@link UndefinedOnPartialDeep}, but instead of only widening the already-optional keys, it widens *every* key (required and optional alike) so that each value can additionally be `undefined`. Keys keep their original optionality and `readonly` modifiers, and the transformation is applied at every level.
+Unlike {@link PartialDeep}, this type keeps required properties required. It widens primitive values, `Date`, `RegExp`, functions, and constructors to accept `undefined`, while preserving the structure of nested objects, arrays, tuples, maps, sets, and promises. Optional and `readonly` modifiers are preserved.
 
-Use-cases:
-- Modeling a fully-shaped object whose fields are all present but may not yet be populated, such as a form-state object initialized from a schema before the user fills it in.
-- Describing the result of a reset or clear operation that keeps the object's structure while blanking out every value.
-- Typing partially-hydrated data where every field might be missing a value but the shape is fixed.
-
-Use `{[Key in keyof Type]: Type[Key] | undefined}` if you only need one level deep.
+Use this to model form state that retains its nested structure while individual fields are cleared or have not yet been populated.
 
 @example
 ```
@@ -31,7 +25,7 @@ type DraftSettings = UndefinableDeep<Settings>;
 // 	textEditor: {
 // 		fontSize: number | undefined;
 // 		fontColor: string | undefined;
-// 	} | undefined;
+// 	};
 // 	autosave: boolean | undefined;
 // }
 
@@ -44,7 +38,9 @@ const draft: DraftSettings = {
 };
 ```
 
-Note that types containing overloaded functions are not made deeply undefinable due to a [TypeScript limitation](https://github.com/microsoft/TypeScript/issues/29732).
+The transformation recurses into object properties and collection elements. For example, `string[]` becomes `Array<string | undefined>`, and `Promise<string>` becomes `Promise<string | undefined>`. An object-valued property or collection element stays an object unless its original type already includes `undefined`.
+
+Functions and constructors are leaves: their signatures and attached properties are preserved unchanged, including generic and overloaded signatures. Weak collections exclude `undefined` from transformed keys because it is not a valid `WeakMap` key or `WeakSet` item. A `never` leaf becomes `undefined`.
 
 @see {@link UndefinedOnPartialDeep}
 
@@ -53,46 +49,26 @@ Note that types containing overloaded functions are not made deeply undefinable 
 @category Set
 @category Map
 */
-export type UndefinableDeep<T> = T extends BuiltIns | ((new (...arguments_: any[]) => unknown))
-	? T
-	: T extends Map<infer KeyType, infer ValueType>
-		? Map<UndefinableDeep<KeyType>, UndefinableDeep<ValueType>>
-		: T extends Set<infer ItemType>
-			? Set<UndefinableDeep<ItemType>>
-			: T extends ReadonlyMap<infer KeyType, infer ValueType>
-				? ReadonlyMap<UndefinableDeep<KeyType>, UndefinableDeep<ValueType>>
-				: T extends ReadonlySet<infer ItemType>
-					? ReadonlySet<UndefinableDeep<ItemType>>
-					: T extends WeakMap<infer KeyType, infer ValueType>
-						? WeakMap<UndefinableDeep<KeyType>, UndefinableDeep<ValueType>>
-						: T extends WeakSet<infer ItemType>
-							? WeakSet<UndefinableDeep<ItemType>>
-							: T extends Promise<infer ValueType>
-								? Promise<UndefinableDeep<ValueType>>
-								: T extends (...arguments_: any[]) => unknown
-									? IsNever<keyof T> extends true
-										? T // For functions with no properties
-										: HasMultipleCallSignatures<T> extends true
-											? T
-											: ((...arguments_: Parameters<T>) => ReturnType<T>) & UndefinableObjectDeep<T>
-									: T extends readonly unknown[]
-										? UndefinableListDeep<T>
-										: T extends object
-											? Simplify<UndefinableObjectDeep<T>> // `Simplify` to prevent `UndefinableObjectDeep` from appearing in the resulting type
-											: unknown;
-
-/**
-Same as `UndefinableDeep`, but accepts only arrays and tuples as inputs, recursing into their elements without making the elements themselves `undefined`. Homomorphic mapping preserves the tuple structure along with `readonly`, optional, and rest modifiers. Internal helper for `UndefinableDeep`.
-*/
-type UndefinableListDeep<T extends readonly unknown[]> = {
-	[KeyType in keyof T]: UndefinableDeep<T[KeyType]>
-};
-
-/**
-Same as `UndefinableDeep`, but accepts only `object`s as inputs. Internal helper for `UndefinableDeep`.
-*/
-type UndefinableObjectDeep<ObjectType extends object> = {
-	[KeyType in keyof ObjectType]: UndefinableDeep<ObjectType[KeyType]> | undefined
-};
+export type UndefinableDeep<Type> = IsNever<Type> extends true
+	? undefined
+	: Type extends BuiltIns | Function
+		? Type | undefined
+		: Type extends Map<infer KeyType, infer ValueType>
+			? Map<UndefinableDeep<KeyType>, UndefinableDeep<ValueType>>
+			: Type extends Set<infer ItemType>
+				? Set<UndefinableDeep<ItemType>>
+				: Type extends ReadonlyMap<infer KeyType, infer ValueType>
+					? ReadonlyMap<UndefinableDeep<KeyType>, UndefinableDeep<ValueType>>
+					: Type extends ReadonlySet<infer ItemType>
+						? ReadonlySet<UndefinableDeep<ItemType>>
+						: Type extends WeakMap<infer KeyType, infer ValueType>
+							? WeakMap<Extract<UndefinableDeep<KeyType>, WeakKey>, UndefinableDeep<ValueType>>
+							: Type extends WeakSet<infer ItemType>
+								? WeakSet<Extract<UndefinableDeep<ItemType>, WeakKey>>
+								: Type extends Promise<infer ValueType>
+									? Promise<UndefinableDeep<ValueType>>
+									: Type extends object
+										? {[KeyType in keyof Type]: UndefinableDeep<Type[KeyType]>}
+										: Type | undefined;
 
 export {};
